@@ -14,7 +14,9 @@ import os
 def _lazy_repr(self):
     return self.__str__()
 
+
 DISPLAY_WIDTH = 120
+
 
 class RepoSpec:
     def __init__(self, name: str, *sub_directories):
@@ -51,13 +53,18 @@ class Command(ABC):
         self.working_directory = os.getcwd()
 
     def run(self):
-        print(f'{self.working_directory} > "{str(self)}"')
-        
+        command_representation = f'{self.working_directory} > "{str(self)}"'
+
+        print(command_representation)
+
         saved_cwd = os.getcwd()
 
         try:
             os.chdir(self.working_directory)
             self._invoke()
+        except subprocess.CalledProcessError as e:
+            print("\n[FAILED COMMAND]\n" + command_representation)
+            raise e
         finally:
             os.chdir(saved_cwd)
 
@@ -137,15 +144,20 @@ class Test:
     def run(self, repo_root: Path, working_directory: Path) -> TestResult:
         print(self.name.center(DISPLAY_WIDTH, "_"))
 
-        self.repo_root_setup_command.with_working_directory(repo_root).run()
-        self.setup_command.with_working_directory(working_directory).run()
+        try:
+            self.repo_root_setup_command.with_working_directory(
+                repo_root).run()
+            self.setup_command.with_working_directory(working_directory).run()
 
-        test_command = self.test_command.with_working_directory(
-            working_directory)
+            test_command = self.test_command.with_working_directory(
+                working_directory)
 
-        runtime_in_seconds = timeit(lambda: test_command.run(), number=1)
+            runtime_in_seconds = timeit(lambda: test_command.run(), number=1)
 
-        return TestResult(self.name, timedelta(seconds=runtime_in_seconds))
+            return TestResult(self.name, timedelta(seconds=runtime_in_seconds))
+        except Exception:
+            print(f"\n[Failed test] {self.name}")
+            raise
 
 
 @dataclass(frozen=True)
@@ -163,10 +175,15 @@ class TestSuite:
         print()
         print(self.name.center(DISPLAY_WIDTH, "="))
 
-        test_results = [test.run(repo_root, working_directory)
-                        for test in self.tests]
+        try:
+            test_results = [test.run(repo_root, working_directory)
+                            for test in self.tests]
 
-        return TestSuiteResult(self.name, test_results)
+            return TestSuiteResult(self.name, test_results)
+        except Exception:
+            print(f"\n[Failed TestSuite] {self.name}")
+            print()
+            raise
 
 
 @dataclass(frozen=True)
@@ -219,4 +236,3 @@ def write_results_to_csv(repo_results: Sequence[RepoResults], results_file: os.P
         writer.writerows(rows)
 
     print(f"Wrote results to: {results_file_path}")
-
