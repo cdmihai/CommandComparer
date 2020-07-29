@@ -14,6 +14,7 @@ QUICKBUILD_INSTALLATION = Path(
 assert QUICKBUILD_INSTALLATION.is_dir()
 QUICKBUILD_EXE = next(QUICKBUILD_INSTALLATION.glob(r"**\quickbuild.exe"), None)
 assert QUICKBUILD_EXE is not None
+assert QUICKBUILD_EXE.is_file()
 
 REPOS = [
     RepoSpec(
@@ -38,14 +39,16 @@ MSBUILD_COMMON_ARGS = (
 MSBUILD_BASELINE_BUILD = ProcessCommand(
     str(BASELINE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS)
 
-MSBUILD_CACHE_BUILD = ProcessCommand(str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false",
+MSBUILD_QB_FU2D_BUILD = ProcessCommand(str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false",
                                      f"/logger:CacheInitializationLogger,{CACHE_INITIALIZATION_LOGGER_DLL}")
+
+MSBUILD_FU2D_BUILD = ProcessCommand(str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false")
 
 QUICKBUILD_BUILD = ProcessCommand(str(QUICKBUILD_EXE), "-notest", "-msbuildrestore:false")
 
 TEST_SUITES = [
     TestSuite(
-        name="qb-cache",
+        name="qb",
         tests=[
             Test(
                 name="clean_remote_cache",
@@ -63,28 +66,6 @@ TEST_SUITES = [
             Test(
                 name="incremental",
                 test_command=QUICKBUILD_BUILD
-            )
-        ]
-    ),
-    TestSuite(
-        name="msb-cache",
-        tests=[
-            Test(
-                name="clean_remote_cache",
-                repo_root_setup_command=Commands(
-                    DELETE_QB_CACHE, CLEAN_REPOSITORY),
-                setup_command=MSBUILD_RESTORE,
-                test_command=MSBUILD_CACHE_BUILD
-            ),
-            Test(
-                name="clean_local_cache",
-                repo_root_setup_command=CLEAN_REPOSITORY,
-                setup_command=MSBUILD_RESTORE,
-                test_command=MSBUILD_CACHE_BUILD
-            ),
-            Test(
-                name="incremental",
-                test_command=MSBUILD_CACHE_BUILD
             )
         ]
     ),
@@ -100,6 +81,43 @@ TEST_SUITES = [
             Test(
                 name="incremental",
                 test_command=MSBUILD_BASELINE_BUILD
+            )
+        ]
+    ),
+    TestSuite(
+        name="msb-qb-fu2d",
+        tests=[
+            Test(
+                name="clean_remote_cache",
+                repo_root_setup_command=Commands(
+                    DELETE_QB_CACHE, CLEAN_REPOSITORY),
+                setup_command=MSBUILD_RESTORE,
+                test_command=MSBUILD_QB_FU2D_BUILD
+            ),
+            Test(
+                name="clean_local_cache",
+                repo_root_setup_command=CLEAN_REPOSITORY,
+                setup_command=MSBUILD_RESTORE,
+                test_command=MSBUILD_QB_FU2D_BUILD
+            ),
+            Test(
+                name="incremental",
+                test_command=MSBUILD_QB_FU2D_BUILD
+            )
+        ]
+    ),
+    TestSuite(
+        name="msb-fu2d",
+        tests=[
+            Test(
+                name="clean",
+                repo_root_setup_command=CLEAN_REPOSITORY,
+                setup_command=MSBUILD_RESTORE,
+                test_command=MSBUILD_FU2D_BUILD
+            ),
+            Test(
+                name="incremental",
+                test_command=MSBUILD_FU2D_BUILD
             )
         ]
     )
