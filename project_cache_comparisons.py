@@ -1,4 +1,4 @@
-from measure_repos_lib import *
+from command_comparer import *
 
 BASELINE_MSBUILD_EXE = Path(
     r'E:\projects\msbuild_2\artifacts\bin\bootstrap\net472\MSBuild\Current\Bin\MSBuild.exe')

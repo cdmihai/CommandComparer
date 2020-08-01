@@ -1,7 +1,7 @@
 import unittest
 import sys
 
-from measure_repos_lib import *
+from command_comparer import *
 
 from assertpy import assert_that # type: ignore
 from contextlib import contextmanager
