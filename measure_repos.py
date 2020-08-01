@@ -16,14 +16,6 @@ QUICKBUILD_EXE = next(QUICKBUILD_INSTALLATION.glob(r"**\quickbuild.exe"), None)
 assert QUICKBUILD_EXE is not None
 assert QUICKBUILD_EXE.is_file()
 
-REPOS = [
-    RepoSpec(
-        "cloudbuild",
-        r"private\BuildEngine\Enlistment.Library",  # 32 build nodes
-        r"private\BuildEngine"  # 124 build nodes
-    )
-]
-
 CLEAN_REPOSITORY = ProcessCommand("git", "clean", "-xdf")
 
 DELETE_QB_CACHE = PowershellCommand(
@@ -40,11 +32,21 @@ MSBUILD_BASELINE_BUILD = ProcessCommand(
     str(BASELINE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS)
 
 MSBUILD_QB_FU2D_BUILD = ProcessCommand(str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false",
-                                     f"/logger:CacheInitializationLogger,{CACHE_INITIALIZATION_LOGGER_DLL}")
+                                       f"/logger:CacheInitializationLogger,{CACHE_INITIALIZATION_LOGGER_DLL}")
 
-MSBUILD_FU2D_BUILD = ProcessCommand(str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false")
+MSBUILD_FU2D_BUILD = ProcessCommand(
+    str(CACHE_MSBUILD_EXE), *MSBUILD_COMMON_ARGS, "/p:BuildProjectReferences=false")
 
-QUICKBUILD_BUILD = ProcessCommand(str(QUICKBUILD_EXE), "-notest", "-msbuildrestore:false")
+QUICKBUILD_BUILD = ProcessCommand(
+    str(QUICKBUILD_EXE), "-notest", "-msbuildrestore:false")
+
+REPOS = [
+    RepoSpec(
+        "cloudbuild",
+        r"private\BuildEngine\Enlistment.Library",  # 32 build nodes
+        r"private\BuildEngine"  # 124 build nodes
+    )
+]
 
 TEST_SUITES = [
     TestSuite(
@@ -130,5 +132,5 @@ assert CACHE_INITIALIZATION_LOGGER_DLL.is_file()
 # add msbuild to the path to make qb happy
 os.environ["PATH"] = f"{str(BASELINE_MSBUILD_EXE.parent)}{os.pathsep}{os.environ['PATH']}"
 
-repo_results = run_tests(REPOS, TEST_REPOS_ROOT, TEST_SUITES)
-write_results_to_csv(repo_results, "repo_results.csv")
+repo_results = run_tests(REPOS, TEST_REPOS_ROOT, TEST_SUITES, repetitions=3)
+write_results_to_csv(repo_results, Path("repo_results.csv"))
