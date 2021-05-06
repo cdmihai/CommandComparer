@@ -1,15 +1,14 @@
+import copy
+import csv
+import os
+import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from timeit import timeit
-from typing import Tuple, List, Sequence, Callable, DefaultDict, Union
-import copy
-import csv
-import subprocess
-import sys
-import os
+from typing import Tuple, Sequence, Callable
 
 
 def _lazy_repr(self):

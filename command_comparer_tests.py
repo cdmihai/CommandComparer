@@ -3,11 +3,10 @@ import sys
 
 from command_comparer import *
 
-from assertpy import assert_that # type: ignore
+from assertpy import assert_that  # type: ignore
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import timedelta
-from pyfakefs.fake_filesystem_unittest import TestCase # type: ignore
+from pyfakefs.fake_filesystem_unittest import TestCase  # type: ignore
 from pyfakefs.fake_filesystem_unittest import Pause
 from typing import Dict, Tuple, Any
 from types import ModuleType
@@ -32,7 +31,7 @@ def mock_types(mock_map: Dict[Tuple[ModuleType, str], Any]):
 
 class MockTest(Test):
     def run(self, repo_root: Path, working_directory: Path) -> TestResult:
-        time_delta = self.test_command.mock_time_delta() # type: ignore
+        time_delta = self.test_command.mock_time_delta()  # type: ignore
         return TestResult(self.name, time_delta)
 
 
@@ -62,6 +61,7 @@ class MockTimeDeltaCommand(Command):
 
         return self
 
+
 class Tests(TestCase):
     def setUp(self):
         self.setUpPyfakefs()
@@ -71,18 +71,18 @@ class Tests(TestCase):
 
     def test_ProcessCommand_calls_process(self):
         with Pause(self.fs):
-            command = ProcessCommand(sys.executable, "-c", "print('foo', end='')", capture_output = True)
+            command = ProcessCommand(sys.executable, "-c", "print('foo', end='')", capture_output=True)
             assert_that(command.working_directory).is_equal_to(Path.cwd())
-            
+
             command.run()
 
             assert_that(command.captured_output).is_equal_to(b"foo")
-    
+
     def test_PowershellCommand_calls_process(self):
         with Pause(self.fs):
-            command = PowershellCommand("Write-Host -NoNewline 'foobar'", capture_output = True)
+            command = PowershellCommand("Write-Host -NoNewline 'foobar'", capture_output=True)
             assert_that(command.working_directory).is_equal_to(Path.cwd())
-            
+
             command.run()
 
             assert_that(command.captured_output).is_equal_to(b"foobar")
@@ -91,7 +91,7 @@ class Tests(TestCase):
         working_directory = Path("working_directory")
         working_directory.mkdir()
 
-        command1 = ProcessCommand(sys.executable, "-c", "print('foo')", capture_output = True)
+        command1 = ProcessCommand(sys.executable, "-c", "print('foo')", capture_output=True)
         command2 = command1.with_working_directory(working_directory)
 
         assert_that(command1).is_not_same_as(command2)
@@ -115,8 +115,8 @@ class Tests(TestCase):
         working_directory.mkdir()
 
         test.run(
-            repo_root = repo_root,
-            working_directory = working_directory
+            repo_root=repo_root,
+            working_directory=working_directory
         )
 
         assert_that(repo_root_setup._invokeCalls).is_equal_to(1)
