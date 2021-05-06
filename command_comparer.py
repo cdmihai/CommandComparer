@@ -4,11 +4,13 @@ import os
 import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from timeit import timeit
-from typing import Tuple, Sequence, Callable
+from typing import Tuple, Sequence, Callable, Optional
 
 
 def _lazy_repr(self):
@@ -119,9 +121,9 @@ class ProcessCommand(Command):
             capture_output=self.capture_output
         )
 
-        assert completed_process.returncode == 0
-
         self.captured_output = completed_process.stdout if self.capture_output else None
+
+        assert completed_process.returncode == 0
 
     def __str__(self):
         return " ".join(self.args)
@@ -137,6 +139,8 @@ class PowershellCommand(ProcessCommand):
 class TestResult:
     name: str
     time_delta: timedelta
+    # todo: don't make it optional and implement all scenarios that pass None
+    command: Optional[Command]
 
 
 @dataclass(frozen=True)
@@ -150,8 +154,7 @@ class Test:
         print(self.name.center(DISPLAY_WIDTH, "_"))
 
         try:
-            self.repo_root_setup_command.with_working_directory(
-                repo_root).run()
+            self.repo_root_setup_command.with_working_directory(repo_root).run()
             self.setup_command.with_working_directory(working_directory).run()
 
             test_command = self.test_command.with_working_directory(
@@ -159,7 +162,7 @@ class Test:
 
             runtime_in_seconds = timeit(lambda: test_command.run(), number=1)
 
-            return TestResult(self.name, (timedelta(seconds=runtime_in_seconds)))
+            return TestResult(self.name, (timedelta(seconds=runtime_in_seconds)), test_command)
         except Exception:
             print(f"\n[Failed test] {self.name}")
             raise
@@ -175,20 +178,22 @@ class TestSuiteResult:
 class TestSuite:
     name: str
     tests: Sequence[Test]
+    environment_variables: Mapping[str, str] = os.environ
 
     def run(self, repo_root: Path, working_directory: Path) -> TestSuiteResult:
         print()
         print(self.name.center(DISPLAY_WIDTH, "="))
 
-        try:
-            test_results = [test.run(repo_root, working_directory)
-                            for test in self.tests]
+        with environment_variables(**self.environment_variables):
+            try:
+                test_results = [test.run(repo_root, working_directory)
+                                for test in self.tests]
 
-            return TestSuiteResult(self.name, tuple(test_results))
-        except Exception:
-            print(f"\n[Failed TestSuite] {self.name}")
-            print()
-            raise
+                return TestSuiteResult(self.name, tuple(test_results))
+            except Exception:
+                print(f"\n[Failed TestSuite] {self.name}")
+                print()
+                raise
 
 
 @dataclass(frozen=True)
@@ -197,12 +202,23 @@ class RepoResults:
     test_suite_results: Tuple[TestSuiteResult, ...]
 
 
+@contextmanager
+def environment_variables(**kwargs):
+    original_environment = os.environ.copy()
+    try:
+        os.environ |= kwargs
+        yield
+    finally:
+        os.environ.clear()
+        os.environ |= original_environment
+
+
 def test_suite_repeater(test_suite_runner: Callable[[], TestSuiteResult], repetitions: int) -> TestSuiteResult:
     """
     Run the test suite multiple times and merge the multiple TestSuiteResults back into a single TestSuiteResult
     """
 
-    def mergeTestResults(test_results: Tuple[str, Sequence[TestResult]]) -> TestResult:
+    def mergeTestResults(test_results: tuple[str, Sequence[TestResult]]) -> TestResult:
         name, tests = test_results
 
         assert all(name == test.name for test in tests)
@@ -210,7 +226,7 @@ def test_suite_repeater(test_suite_runner: Callable[[], TestSuiteResult], repeti
         average_time = sum((test.time_delta for test in tests),
                            timedelta(0)) / repetitions
 
-        return TestResult(name, average_time)
+        return TestResult(name, average_time, None)
 
     test_results_per_name = defaultdict(list)
     test_suite_name = None

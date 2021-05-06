@@ -1,5 +1,8 @@
+import os
 import unittest
 import sys
+
+import pytest
 
 from command_comparer import *
 
@@ -32,7 +35,7 @@ def mock_types(mock_map: Dict[Tuple[ModuleType, str], Any]):
 class MockTest(Test):
     def run(self, repo_root: Path, working_directory: Path) -> TestResult:
         time_delta = self.test_command.mock_time_delta()  # type: ignore
-        return TestResult(self.name, time_delta)
+        return TestResult(self.name, time_delta, None)
 
 
 class MockTimeDeltaCommand(Command):
@@ -60,6 +63,19 @@ class MockTimeDeltaCommand(Command):
         self.working_directory = working_directory
 
         return self
+
+
+class MockException(Exception):
+    pass
+
+
+class ExceptionCommand(Command):
+    def __init__(self, message:str):
+        super().__init__()
+        self.message = message
+
+    def _invoke(self):
+        raise MockException(self.message)
 
 
 class Tests(TestCase):
@@ -131,7 +147,37 @@ class Tests(TestCase):
         assert_that(test_command.with_working_directory_calls).is_equal_to(1)
         assert_that(test_command.working_directory).is_equal_to(working_directory)
 
-    def test_run_tests_does_expected_work_on_MockTest(self):
+    def test_suite_exposes_command_exception(self):
+        suite = TestSuite("s", [Test("t", ExceptionCommand("foo exception"))])
+
+        with pytest.raises(MockException) as exc_info:
+            suite.run(Path.cwd(), Path.cwd())
+
+        assert_that(exc_info.value.args).contains("foo exception")
+
+    def test_suite_exposes_command_exception_when_environment_vars_are_set(self):
+        suite = TestSuite("s", [Test("t", ExceptionCommand("foo exception"))], {"foo": "bar"})
+
+        with pytest.raises(MockException) as exc_info:
+            suite.run(Path.cwd(), Path.cwd())
+
+        assert_that(exc_info.value.args).contains("foo exception")
+
+    def test_suite_can_set_environment_variables(self):
+        with Pause(self.fs):
+            assert_that(os.environ).does_not_contain_key("foo")
+            initial_environment = os.environ.copy()
+
+            suite_result = TestSuite(
+                "s",
+                [Test("t", PowershellCommand("Write-Host -NoNewline $env:foo", capture_output=True))],
+                {"foo": "bar"}
+            ).run(Path.cwd(), Path.cwd())
+
+            assert_that(suite_result.test_results[0].command.captured_output).is_equal_to(b'bar')
+            assert_that(os.environ).is_equal_to(initial_environment)
+
+    def test_run_tests_executes_suites_and_averages_runtimes(self):
         repo_path = self.test_root / "r1"
         repo_path.mkdir()
 
@@ -151,10 +197,11 @@ class Tests(TestCase):
                         "s1t1",
                         MockTimeDeltaCommand(
                             [
+                                # mean is 3
                                 timedelta(seconds=1),
                                 timedelta(seconds=2),
                                 timedelta(seconds=6),
-
+                                # mean is 4
                                 timedelta(seconds=1),
                                 timedelta(seconds=3),
                                 timedelta(seconds=8),
@@ -165,10 +212,11 @@ class Tests(TestCase):
                         "s1t2",
                         MockTimeDeltaCommand(
                             [
+                                # mean is 6
                                 timedelta(seconds=3),
                                 timedelta(seconds=5),
                                 timedelta(seconds=10),
-
+                                # mean is 5
                                 timedelta(seconds=3),
                                 timedelta(seconds=4),
                                 timedelta(seconds=8),
@@ -183,11 +231,15 @@ class Tests(TestCase):
         assert_that(results[0].name).is_equal_to(f"r1{os.sep}r1s1")
         assert_that(len(results[0].test_suite_results)).is_equal_to(1)
         assert_that(len(results[0].test_suite_results[0].test_results)).is_equal_to(2)
-        assert_that(results[0].test_suite_results[0].test_results[0].time_delta.total_seconds()).is_equal_to(3)
+        assert_that(results[0].test_suite_results[0].test_results[1].name).is_equal_to("s1t2")
         assert_that(results[0].test_suite_results[0].test_results[1].time_delta.total_seconds()).is_equal_to(6)
+        assert_that(results[0].test_suite_results[0].test_results[0].name).is_equal_to("s1t1")
+        assert_that(results[0].test_suite_results[0].test_results[0].time_delta.total_seconds()).is_equal_to(3)
 
         assert_that(results[1].name).is_equal_to(f"r1{os.sep}r1s2")
         assert_that(len(results[1].test_suite_results)).is_equal_to(1)
         assert_that(len(results[1].test_suite_results[0].test_results)).is_equal_to(2)
+        assert_that(results[1].test_suite_results[0].test_results[0].name).is_equal_to("s1t1")
         assert_that(results[1].test_suite_results[0].test_results[0].time_delta.total_seconds()).is_equal_to(4)
+        assert_that(results[1].test_suite_results[0].test_results[1].name).is_equal_to("s1t2")
         assert_that(results[1].test_suite_results[0].test_results[1].time_delta.total_seconds()).is_equal_to(5)
