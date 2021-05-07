@@ -1,12 +1,10 @@
-import os
-import unittest
-import sys
+from subprocess import CalledProcessError
 
 import pytest
-
-from command_comparer import *
+import sys
 
 from assertpy import assert_that  # type: ignore
+from command_comparer import *
 from contextlib import contextmanager
 from datetime import timedelta
 from pyfakefs.fake_filesystem_unittest import TestCase  # type: ignore
@@ -33,7 +31,7 @@ def mock_types(mock_map: Dict[Tuple[ModuleType, str], Any]):
 
 
 class MockTest(Test):
-    def run(self, repo_root: Path, working_directory: Path) -> TestResult:
+    def run(self, repo_root: Optional[Path] = None, working_directory: Optional[Path] = None) -> TestResult:
         time_delta = self.test_command.mock_time_delta()  # type: ignore
         return TestResult(self.name, time_delta, None)
 
@@ -57,6 +55,7 @@ class MockTimeDeltaCommand(Command):
 
     def _invoke(self):
         self._invokeCalls = self._invokeCalls + 1
+        return ""
 
     def with_working_directory(self, working_directory: Path):
         self.with_working_directory_calls = self.with_working_directory_calls + 1
@@ -70,12 +69,21 @@ class MockException(Exception):
 
 
 class ExceptionCommand(Command):
-    def __init__(self, message:str):
+    def __init__(self, message: str):
         super().__init__()
         self.message = message
 
     def _invoke(self):
         raise MockException(self.message)
+
+
+class MockCommand(Command):
+    def __init__(self, command_output: str, validation_checks=None):
+        super(MockCommand, self).__init__(validation_checks)
+        self.command_output = command_output
+
+    def _invoke(self) -> str:
+        return self.command_output
 
 
 class Tests(TestCase):
@@ -87,7 +95,7 @@ class Tests(TestCase):
 
     def test_ProcessCommand_calls_process(self):
         with Pause(self.fs):
-            command = ProcessCommand(sys.executable, "-c", "print('foo', end='')", capture_output=True)
+            command = ProcessCommand(sys.executable, "-c", "print('foo', end='')")
             assert_that(command.working_directory).is_equal_to(Path.cwd())
 
             command.run()
@@ -96,7 +104,7 @@ class Tests(TestCase):
 
     def test_PowershellCommand_calls_process(self):
         with Pause(self.fs):
-            command = PowershellCommand("Write-Host -NoNewline 'foobar'", capture_output=True)
+            command = PowershellCommand("Write-Host -NoNewline 'foobar'")
             assert_that(command.working_directory).is_equal_to(Path.cwd())
 
             command.run()
@@ -107,7 +115,7 @@ class Tests(TestCase):
         working_directory = Path("working_directory")
         working_directory.mkdir()
 
-        command1 = ProcessCommand(sys.executable, "-c", "print('foo')", capture_output=True)
+        command1 = ProcessCommand(sys.executable, "-c", "print('foo')")
         command2 = command1.with_working_directory(working_directory)
 
         assert_that(command1).is_not_same_as(command2)
@@ -147,11 +155,86 @@ class Tests(TestCase):
         assert_that(test_command.with_working_directory_calls).is_equal_to(1)
         assert_that(test_command.working_directory).is_equal_to(working_directory)
 
+    def test_Test_validates_commands_and_fails_validation(self):
+        with Pause(self.fs):
+            test = Test("t", NullCommand(), repo_root_setup_command=MockCommand("", [Func(lambda _: False, "lambda")]))
+            with pytest.raises(ValidationException) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: lambda")
+
+            multiline = """FooBar
+
+                        Hello (World)"""
+
+            test = Test("t", NullCommand(), setup_command=MockCommand(multiline, [Include("hello")]))
+            with pytest.raises(ValidationException) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: Include(hello)")
+
+            test = Test("t", MockCommand(multiline, [Exclude("Hello")]))
+            with pytest.raises(ValidationException) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: Exclude(Hello)")
+
+    def test_Test_validates_commands_and_passes_validation(self):
+        with Pause(self.fs):
+            test = Test("t", NullCommand(), repo_root_setup_command=MockCommand("", [Func(lambda _: True, "lambda")]))
+            test.run()
+
+            multiline = """FooBar
+            
+                        Hello (World)"""
+            test = Test("t", NullCommand(), setup_command=MockCommand(multiline, [Include("(Worl")]))
+            test.run()
+
+            test = Test("t", MockCommand(multiline, [Exclude("wor")]))
+            test.run()
+
+    def test_Validation_can_be_added_to(self):
+        with Pause(self.fs):
+            command = MockCommand("FooBar", [Exclude("oba")])
+            command = command.add_validation_checks([Exclude("Bar")])
+
+            test = Test("t", command)
+            with pytest.raises(ValidationException) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: Exclude(Bar)")
+
+            command = MockCommand("FooBar", [Exclude("oBa")])
+            command = command.add_validation_checks([Include("Bar")])
+            command.run()
+            with pytest.raises(ValidationException) as exc_info:
+                command.validate()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: Exclude(oBa)")
+
+    def test_Validation_works_with_real_command_output(self):
+        with Pause(self.fs):
+            command = PowershellCommand("Write-Host -NoNewline This is a test", validation_checks=[Include("foobar")])
+
+            test = Test("t", command)
+            with pytest.raises(ValidationException) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.args[0]).starts_with("Validation failed: Include(foobar)")
+
+    def test_nonzero_return_fails(self):
+        with Pause(self.fs):
+            test = Test("t", PowershellCommand("Invalid Powershell"))
+            with pytest.raises(CalledProcessError) as exc_info:
+                test.run()
+
+            assert_that(exc_info.value.cmd[-1]).is_equal_to("Invalid Powershell")
+
     def test_suite_exposes_command_exception(self):
         suite = TestSuite("s", [Test("t", ExceptionCommand("foo exception"))])
 
         with pytest.raises(MockException) as exc_info:
-            suite.run(Path.cwd(), Path.cwd())
+            suite.run()
 
         assert_that(exc_info.value.args).contains("foo exception")
 
@@ -159,7 +242,7 @@ class Tests(TestCase):
         suite = TestSuite("s", [Test("t", ExceptionCommand("foo exception"))], {"foo": "bar"})
 
         with pytest.raises(MockException) as exc_info:
-            suite.run(Path.cwd(), Path.cwd())
+            suite.run()
 
         assert_that(exc_info.value.args).contains("foo exception")
 
@@ -170,9 +253,9 @@ class Tests(TestCase):
 
             suite_result = TestSuite(
                 "s",
-                [Test("t", PowershellCommand("Write-Host -NoNewline $env:foo", capture_output=True))],
+                [Test("t", PowershellCommand("Write-Host -NoNewline $env:foo"))],
                 {"foo": "bar"}
-            ).run(Path.cwd(), Path.cwd())
+            ).run()
 
             assert_that(suite_result.test_results[0].command.captured_output).is_equal_to(b'bar')
             assert_that(os.environ).is_equal_to(initial_environment)

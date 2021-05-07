@@ -1,6 +1,7 @@
 import copy
 import csv
 import os
+import re
 import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 from timeit import timeit
-from typing import Tuple, Sequence, Callable, Optional
+from typing import Tuple, Sequence, Callable, Optional, Iterable, Union
 
 
 def _lazy_repr(self):
@@ -50,12 +51,63 @@ class RootedRepo:
         return _lazy_repr(self)
 
 
+class CommandValidator(ABC):
+    @abstractmethod
+    def validate(self, command_stdout: str) -> bool:
+        ...
+
+
+class Func(CommandValidator):
+    """
+    Should be stateless. Can be invoked multiple times for different commands.
+    """
+
+    def __init__(self, func: Callable[[str], bool], description: str):
+        self.func = func
+        self.description = description
+
+    def validate(self, command_stdout) -> bool:
+        return self.func(command_stdout)
+
+    def __str__(self):
+        return self.description
+
+
+class Include(CommandValidator):
+    def __init__(self, include_string: str):
+        self.include_string = include_string
+
+    def validate(self, command_stdout: str) -> bool:
+        return self.include_string in command_stdout
+
+    def __str__(self):
+        return f"Include({self.include_string})"
+
+
+class Exclude(CommandValidator):
+    def __init__(self, exclude_string: str):
+        self.exclude_string = exclude_string
+
+    def validate(self, command_stdout: str) -> bool:
+        return self.exclude_string not in command_stdout
+
+    def __str__(self):
+        return f"Exclude({self.exclude_string})"
+
+
+class ValidationException(Exception):
+    ...
+
+
 class Command(ABC):
-    def __init__(self):
+    def __init__(self, validation_checks: Optional[Sequence[CommandValidator]] = None):
         self.working_directory = Path.cwd()
+        self.validation_checks = validation_checks if validation_checks else []
+        # gets set after command is run
+        self.captured_output = None
 
     def run(self):
-        command_representation = f'{self.working_directory} > "{str(self)}"'
+        command_representation = str(self)
 
         print(command_representation)
 
@@ -63,30 +115,58 @@ class Command(ABC):
 
         try:
             os.chdir(self.working_directory)
-            self._invoke()
+            self.captured_output = self._invoke()
         except subprocess.CalledProcessError as e:
             print("\n[FAILED COMMAND]\n" + command_representation)
             raise e
         finally:
             os.chdir(saved_cwd)
 
+    def validate(self):
+        assert self.captured_output is not None, "Command must be run before it can be validated"
+
+        output_str = self.captured_output if type(self.captured_output) is str else self.captured_output.decode('utf-8')
+
+        for validator in self.validation_checks:
+            if not validator.validate(output_str):
+                # TODO: this is too early to decide how to handle failed validations. It should be handled higher up.
+                print(output_str)
+                # trigger an exception to stop the tests
+                raise ValidationException(f"Validation failed: {str(validator)}")
+
     @abstractmethod
-    def _invoke(self):
+    def _invoke(self) -> Union[str, bytes]:
+        """
+        Executes the command.
+        :returns: The captured output from the command. Can be empty string if no output gets produced.
+        """
         ...
 
-    def with_working_directory(self, working_directory: Path):
+    def with_working_directory(self, working_directory: Path) -> 'Command':
         clone = copy.deepcopy(self)
         clone.working_directory = working_directory
 
         return clone
 
+    def add_validation_checks(self, validation_checks: Sequence[CommandValidator]) -> 'Command':
+        clone = copy.deepcopy(self)
+        clone.validation_checks = [*self.validation_checks, *list(validation_checks)]
+
+        return clone
+
+    def __str__(self):
+        return f'{self.working_directory} > '
+
 
 class NullCommand(Command):
-    def run(self):
-        ...
+    def __init__(self):
+        super().__init__()
 
     def _invoke(self):
-        ...
+        return ""
+
+    def __str__(self):
+        return super(NullCommand, self).__str__() + "NullCommand"
 
 
 class Commands(Command):
@@ -98,9 +178,21 @@ class Commands(Command):
         for command in self.commands:
             command.run()
 
+        return ""
+
+    def validate(self):
+        for command in self.commands:
+            command.validate()
+
     def with_working_directory(self, working_directory: Path):
-        self.commands = tuple(command.with_working_directory(
-            working_directory) for command in self.commands)
+        self.commands = tuple(command.with_working_directory(working_directory)
+                              for command in self.commands)
+
+        return self
+
+    def add_validation_checks(self, validation_checks: Sequence[CommandValidator]) -> 'Command':
+        self.commands = tuple(command.add_validation_checks(validation_checks)
+                              for command in self.commands)
 
         return self
 
@@ -109,30 +201,30 @@ class Commands(Command):
 
 
 class ProcessCommand(Command):
-    def __init__(self, *args: str, capture_output=False):
-        super().__init__()
+    def __init__(self, *args: str, validation_checks: Optional[Sequence[CommandValidator]] = None):
+        super().__init__(validation_checks)
         self.args = copy.copy(args)
-        self.capture_output = capture_output
 
     def _invoke(self):
         completed_process = subprocess.run(
             self.args,
             check=True,
-            capture_output=self.capture_output
+            capture_output=True
         )
 
-        self.captured_output = completed_process.stdout if self.capture_output else None
+        assert completed_process.returncode == 0, f"Non-zero return code for: {str(self)}"
 
-        assert completed_process.returncode == 0
+        return completed_process.stdout
 
     def __str__(self):
-        return " ".join(self.args)
+        return super(ProcessCommand, self).__str__() + " ".join(self.args)
 
 
 class PowershellCommand(ProcessCommand):
-    def __init__(self, *args: str, capture_output=False):
-        super().__init__("powershell", "-nologo", "-noprofile",
-                         "-noninteractive", "-c", *args, capture_output=capture_output)
+    def __init__(self, *args: str, validation_checks: Optional[Sequence[CommandValidator]] = None):
+        super().__init__("powershell", "-nologo", "-noprofile", "-noninteractive", "-c",
+                         *args,
+                         validation_checks=validation_checks)
 
 
 @dataclass(frozen=True)
@@ -150,17 +242,26 @@ class Test:
     repo_root_setup_command: Command = field(default=NullCommand())
     setup_command: Command = field(default=NullCommand())
 
-    def run(self, repo_root: Path, working_directory: Path) -> TestResult:
+    def run(self, repo_root: Optional[Path] = None, working_directory: Optional[Path] = None) -> TestResult:
         print(self.name.center(DISPLAY_WIDTH, "_"))
 
+        repo_root = repo_root or Path.cwd()
+        working_directory = working_directory or Path.cwd()
+
         try:
-            self.repo_root_setup_command.with_working_directory(repo_root).run()
-            self.setup_command.with_working_directory(working_directory).run()
+            root_setup_command = self.repo_root_setup_command.with_working_directory(repo_root)
+            root_setup_command.run()
+            root_setup_command.validate()
+
+            setup_command = self.setup_command.with_working_directory(working_directory)
+            setup_command.run()
+            setup_command.validate()
 
             test_command = self.test_command.with_working_directory(
                 working_directory)
 
             runtime_in_seconds = timeit(lambda: test_command.run(), number=1)
+            test_command.validate()
 
             return TestResult(self.name, (timedelta(seconds=runtime_in_seconds)), test_command)
         except Exception:
@@ -180,7 +281,7 @@ class TestSuite:
     tests: Sequence[Test]
     environment_variables: Mapping[str, str] = os.environ
 
-    def run(self, repo_root: Path, working_directory: Path) -> TestSuiteResult:
+    def run(self, repo_root: Optional[Path] = None, working_directory: Optional[Path] = None) -> TestSuiteResult:
         print()
         print(self.name.center(DISPLAY_WIDTH, "="))
 
@@ -253,10 +354,12 @@ def test_suite_repeater(test_suite_runner: Callable[[], TestSuiteResult], repeti
     assert all(len(test_results) ==
                repetitions for test_results in test_results_per_name.values())
 
-    return TestSuiteResult(test_suite_name, tuple(mergeTestResults(test_results) for test_results in test_results_per_name.items()))
+    return TestSuiteResult(test_suite_name,
+                           tuple(mergeTestResults(test_results) for test_results in test_results_per_name.items()))
 
 
-def run_tests(repos: Sequence[RepoSpec], repos_root: Path, test_suites: Sequence[TestSuite], repetitions: int = 1) -> Sequence[RepoResults]:
+def run_tests(repos: Sequence[RepoSpec], repos_root: Path, test_suites: Sequence[TestSuite], repetitions: int = 1) -> \
+Sequence[RepoResults]:
     assert repos_root.exists() and repos_root.is_dir()
     assert len(repos) > 0
     assert len(test_suites) > 0
