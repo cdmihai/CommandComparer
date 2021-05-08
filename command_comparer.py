@@ -1,7 +1,8 @@
 import copy
 import csv
 import os
-import re
+import random
+import string
 import subprocess
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -14,11 +15,32 @@ from timeit import timeit
 from typing import Tuple, Sequence, Callable, Optional, Iterable, Union
 
 
+# TODO: remove this
 def _lazy_repr(self):
     return self.__str__()
 
 
 DISPLAY_WIDTH = 120
+
+
+class TerminalStyleCode:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    END_CODE = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def print_error(s):
+    print(f"{TerminalStyleCode.FAIL}{s}{TerminalStyleCode.END_CODE}")
+
+
+def print_warning(s):
+    print(f"{TerminalStyleCode.WARNING}{s}{TerminalStyleCode.END_CODE}")
 
 
 class RepoSpec:
@@ -359,7 +381,7 @@ def test_suite_repeater(test_suite_runner: Callable[[], TestSuiteResult], repeti
 
 
 def run_tests(repos: Sequence[RepoSpec], repos_root: Path, test_suites: Sequence[TestSuite], repetitions: int = 1) -> \
-Sequence[RepoResults]:
+        Sequence[RepoResults]:
     assert repos_root.exists() and repos_root.is_dir()
     assert len(repos) > 0
     assert len(test_suites) > 0
@@ -390,6 +412,10 @@ Sequence[RepoResults]:
     return repo_results
 
 
+def random_string(size) -> str:
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=size))
+
+
 def write_results_to_csv(repo_results: Sequence[RepoResults], results_file: os.PathLike):
     """
     Prints multiple RepoResults to csv file.
@@ -402,6 +428,12 @@ def write_results_to_csv(repo_results: Sequence[RepoResults], results_file: os.P
     repo                 | <test suite name>_<test name> | ...
     <repo name>_<subdir> | time in seconds               | ...  
     """
+
+    def write_to_file(file_path, header, rows):
+        with open(file_path, 'w', newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
+            writer.writerows(rows)
 
     header = ["repo"] + [f"{test_suite_result.name}_{test_result.name}"
                          for test_suite_result in repo_results[0].test_suite_results
@@ -416,9 +448,12 @@ def write_results_to_csv(repo_results: Sequence[RepoResults], results_file: os.P
     results_file_path = Path(results_file)
     results_file_path.resolve()
 
-    with open(results_file_path, 'w', newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(header)
-        writer.writerows(rows)
+    try:
+        write_to_file(results_file_path, header, rows)
+    except Exception as e:
+        print_error(e)
+        fallback_file_name = f"Results_{random_string(16)}.csv"
+        print_warning(f"Couldn't write to file. Trying to write to {fallback_file_name} as a fallback.")
+        write_to_file(Path(fallback_file_name).resolve(), header, rows)
 
     print(f"Wrote results to: {results_file_path}")
