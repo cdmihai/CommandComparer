@@ -94,7 +94,7 @@ TEST_SUITES = [
                 repo_root_setup_command=Commands(
                     DELETE_QB_CACHE, CLEAN_REPOSITORY),
                 setup_command=MSBUILD_RESTORE,
-                test_command=BUILD_WITH_QUICKBUILD_EXPECT_NO_BUILDS
+                test_command=BUILD_WITH_QUICKBUILD
             ),
             Test(
                 name="clean_local_cache",
@@ -116,12 +116,12 @@ TEST_SUITES = [
                 repo_root_setup_command=Commands(
                     DELETE_QB_CACHE, CLEAN_REPOSITORY),
                 setup_command=MSBUILD_RESTORE,
-                test_command=BUILD_WITH_MSBUILD_EXPECT_ALL_CACHE_HITS
+                test_command=BUILD_WITH_MSBUILD
             ),
             Test(
                 name="clean-local-cache",
                 repo_root_setup_command=CLEAN_REPOSITORY,
-                setup_command=MSBUILD_RESTORE,
+                setup_command=Commands(MSBUILD_RESTORE, BUILD_WITH_QUICKBUILD),
                 test_command=BUILD_WITH_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
@@ -142,12 +142,12 @@ TEST_SUITES = [
                 repo_root_setup_command=Commands(
                     DELETE_QB_CACHE, CLEAN_REPOSITORY),
                 setup_command=MSBUILD_RESTORE,
-                test_command=BUILD_WITH_BASELINE_MSBUILD_EXPECT_ALL_CACHE_HITS
+                test_command=BUILD_WITH_BASELINE_MSBUILD
             ),
             Test(
                 name="clean-local-cache",
                 repo_root_setup_command=CLEAN_REPOSITORY,
-                setup_command=MSBUILD_RESTORE,
+                setup_command=Commands(MSBUILD_RESTORE, BUILD_WITH_QUICKBUILD),
                 test_command=BUILD_WITH_BASELINE_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
