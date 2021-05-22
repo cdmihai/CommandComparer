@@ -3,7 +3,7 @@ from command_comparer import *
 BASELINE_MSBUILD_EXE = Path(r'E:\projects\msbuild_2\artifacts\bin\bootstrap\net472\MSBuild\Current\Bin\MSBuild.exe')
 MSBUILD_EXE = Path(r'E:\projects\msbuild\artifacts\bin\bootstrap\net472\MSBuild\Current\Bin\MSBuild.exe')
 LOCAL_CACHE = Path(r"E:\CloudBuildCache")
-QUICKBUILD_INSTALLATION = Path(r"C:/Users/micodoba/AppData/Local/CloudBuild/quickbuild")
+QUICKBUILD_INSTALLATION = Path(r"E:\projects\CloudBuild\target\distrib\retail\amd64\ClientTools\Client")
 TEST_REPOS_ROOT = Path(r"E:\qb_repos")
 
 assert QUICKBUILD_INSTALLATION.is_dir()
@@ -115,13 +115,13 @@ TEST_SUITES = [
                 name="clean-remote-cache",
                 repo_root_setup_command=Commands(
                     DELETE_QB_CACHE, CLEAN_REPOSITORY),
-                setup_command=Commands(MSBUILD_RESTORE),
+                setup_command=MSBUILD_RESTORE,
                 test_command=BUILD_WITH_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
                 name="clean-local-cache",
                 repo_root_setup_command=CLEAN_REPOSITORY,
-                setup_command=Commands(MSBUILD_RESTORE),
+                setup_command=MSBUILD_RESTORE,
                 test_command=BUILD_WITH_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
@@ -130,7 +130,8 @@ TEST_SUITES = [
             )
         ],
         environment_variables={
-            "EnableQuickBuildCachePlugin": "true"
+            "EnableQuickBuildCachePlugin": "true",
+            "_CurrentQuickBuildPath": str(QUICKBUILD_INSTALLATION)
         }
     ),
     TestSuite(
@@ -140,13 +141,13 @@ TEST_SUITES = [
                 name="clean-remote-cache",
                 repo_root_setup_command=Commands(
                     DELETE_QB_CACHE, CLEAN_REPOSITORY),
-                setup_command=Commands(MSBUILD_RESTORE),
+                setup_command=MSBUILD_RESTORE,
                 test_command=BUILD_WITH_BASELINE_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
                 name="clean-local-cache",
                 repo_root_setup_command=CLEAN_REPOSITORY,
-                setup_command=Commands(MSBUILD_RESTORE),
+                setup_command=MSBUILD_RESTORE,
                 test_command=BUILD_WITH_BASELINE_MSBUILD_EXPECT_ALL_CACHE_HITS
             ),
             Test(
@@ -155,21 +156,22 @@ TEST_SUITES = [
             )
         ],
         environment_variables={
-            "EnableQuickBuildCachePlugin": "true"
+            "EnableQuickBuildCachePlugin": "true",
+            "_CurrentQuickBuildPath": str(QUICKBUILD_INSTALLATION)
         }
     ),
     TestSuite(
-        name="msb-baseline",
+        name="msb",
         tests=[
             Test(
                 name="clean",
                 repo_root_setup_command=CLEAN_REPOSITORY,
                 setup_command=MSBUILD_RESTORE,
-                test_command=BUILD_WITH_BASELINE_MSBUILD
+                test_command=BUILD_WITH_MSBUILD
             ),
             Test(
                 name="incremental",
-                test_command=BUILD_WITH_BASELINE_MSBUILD
+                test_command=BUILD_WITH_MSBUILD
             )
         ]
     )
